@@ -1,0 +1,69 @@
+        ArrayList<RevCommit> revCommits = new ArrayList<>();
+
+        try (Git git = new Git(repository)) {
+
+            // use the following instead to list commits on a specific branch
+            //ObjectId branchId = repository.resolve("e071a3f6c06f41068ad17134189a4ac3073ef76b");
+            //Iterable<RevCommit> commits = git.log().add(branchId).call();
+
+            Iterable<RevCommit> commits = git.log().all().call();
+            for (RevCommit commit : commits) {
+                revCommits.add(commit);
+            }
+
+            AbstractTreeIterator oldTreeParser;
+            AbstractTreeIterator newTreeParser;
+
+            int commitsize = revCommits.size()-1;
+
+            for (int i = commitsize; i > 0 ; i--) {
+
+                String OldName = "";
+                String NewName = "";
+
+                if (commitsize==i) {
+                    oldTreeParser = null;
+                    newTreeParser = prepareTreeParser(repository, revCommits.get(i).getName());
+                    NewName = revCommits.get(i).getName();
+                } else {
+                    oldTreeParser = prepareTreeParser(repository, revCommits.get(i).getName());
+                    newTreeParser = prepareTreeParser(repository, revCommits.get(i-1).getName());
+                    OldName = revCommits.get(i).getName();
+                    NewName = revCommits.get(i-1).getName();
+                }
+
+                FileOutputStream fos = new FileOutputStream(new File("patch/"+OldName + "_" + NewName));
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+
+                // then the porcelain diff-command returns a list of diff entries
+                List<DiffEntry> diff = git.diff().setOldTree(oldTreeParser).setNewTree(newTreeParser).call();
+                for (DiffEntry entry : diff) {
+                    System.out.println("Entry: " + entry + ", from: " + entry.getOldId() + ", to: " + entry.getNewId());
+                    try (DiffFormatter formatter = new DiffFormatter(out)) {
+                        formatter.setRepository(repository);
+                        formatter.format(entry);
+                    }
+                }
+                out.writeTo(fos);
+                fos.close();
+            }
+        }
+
+
+    private static AbstractTreeIterator prepareTreeParser(Repository repository, String objectId) throws IOException {
+        // from the commit we can build the tree which allows us to construct the TreeParser
+        //noinspection Duplicates
+        try (RevWalk walk = new RevWalk(repository)) {
+            RevCommit commit = walk.parseCommit(ObjectId.fromString(objectId));
+            RevTree tree = walk.parseTree(commit.getTree().getId());
+
+            CanonicalTreeParser treeParser = new CanonicalTreeParser();
+            try (ObjectReader reader = repository.newObjectReader()) {
+                treeParser.reset(reader, tree.getId());
+            }
+
+            walk.dispose();
+
+            return treeParser;
+        }
+    }
